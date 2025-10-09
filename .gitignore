@@ -45,9 +45,46 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Qdrant data (if you want to exclude it)
-# qdrant_data/
+# Qdrant data directories
+qdrant_data/
+qdrant_data_*/
+
+# Lock files
 *.lock
+*.pid
 
 # Environment variables
 .env
+.env.local
+.env.*.local
+
+# Evaluation outputs
+evaluation_outputs/
+results/
+outputs/
+*_results.json
+*_evaluation.json
+
+# Model cache files
+*.cache
+.cache/
+model_cache/
+huggingface_cache/
+
+# NLTK data
+nltk_data/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+*.tmp
+
+# Backup files
+*.bak
+*.backup
+*~
