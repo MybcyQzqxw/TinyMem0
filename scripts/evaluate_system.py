@@ -16,6 +16,7 @@
 import json
 import os
 import sys
+import subprocess
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from tqdm import tqdm
@@ -608,6 +609,122 @@ def main():
             print("请在 .env 文件中配置：DASHSCOPE_API_KEY=your_api_key")
             return
         print(f"LLM模式: 阿里云 Dashscope API")
+
+    # --- Ensure embedding model exists (if needed) ---------------------------------
+    def _ensure_embedding_available(project_root: str) -> bool:
+        """Ensure LOCAL_EMBEDDING_MODEL is set or download a default embedding model.
+
+        Returns True if embedding model exists/was downloaded and env var is set, False otherwise.
+        """
+        local_emb = os.getenv("LOCAL_EMBEDDING_MODEL")
+        if local_emb and os.path.exists(local_emb):
+            print(f"Embedding: 使用 LOCAL_EMBEDDING_MODEL={local_emb}")
+            return True
+
+        # try to find any model under ./embedding_models
+        default_dir = os.path.join(project_root, 'embedding_models')
+        if os.path.exists(default_dir) and any(os.scandir(default_dir)):
+            # try to find a reasonable model directory (avoid .lock or temp files)
+            def _find_model_dir(base_dir: str):
+                model_files = ('pytorch_model.bin', 'model.safetensors', 'tf_model.h5', 'model.ckpt.index', 'flax_model.msgpack')
+                for root, dirs, files in os.walk(base_dir):
+                    # skip hidden/temp dirs
+                    if os.path.basename(root).startswith('.'):
+                        continue
+                    for mf in model_files:
+                        if mf in files:
+                            return root
+                # fallback: return first non-hidden child
+                for entry in os.scandir(base_dir):
+                    if not entry.name.startswith('.'):
+                        return entry.path
+                return None
+
+            found = _find_model_dir(default_dir)
+            if found:
+                print(f"Embedding: 在 {default_dir} 发现模型，使用: {found}")
+                os.environ['LOCAL_EMBEDDING_MODEL'] = found
+                return True
+
+        # attempt to run the download_embedding.py script non-interactively
+        download_script = os.path.join(project_root, 'scripts', 'download_embedding.py')
+        if os.path.exists(download_script):
+            print("\n⚙️ 未检测到本地 embedding 模型，正在自动下载默认 embedding 模型到 ./embedding_models（可能需要网络）...")
+            try:
+                subprocess.run([sys.executable, download_script, '--model-id', '1', '--cache-dir', default_dir], check=True)
+            except Exception as e:
+                print(f"❌ 自动下载 embedding 失败: {e}")
+                return False
+
+            # after download, find the actual model dir containing model files (avoid .lock)
+            def _find_model_dir(base_dir: str):
+                model_files = ('pytorch_model.bin', 'model.safetensors', 'tf_model.h5', 'model.ckpt.index', 'flax_model.msgpack')
+                for root, dirs, files in os.walk(base_dir):
+                    if os.path.basename(root).startswith('.'):
+                        continue
+                    for mf in model_files:
+                        if mf in files:
+                            return root
+                # fallback: pick the largest non-hidden directory
+                candidates = [entry for entry in os.scandir(base_dir) if entry.is_dir() and not entry.name.startswith('.')]
+                if candidates:
+                    candidates.sort(key=lambda e: e.stat().st_size if e.is_file() else 0, reverse=True)
+                    return candidates[0].path
+                return None
+
+            found = _find_model_dir(default_dir)
+            if found:
+                os.environ['LOCAL_EMBEDDING_MODEL'] = found
+                print(f"✅ embedding 已下载并设置 LOCAL_EMBEDDING_MODEL={found}")
+                return True
+        else:
+            print("⚠️ 未找到 scripts/download_embedding.py，无法自动下载 embedding。")
+
+        print("❌ embedding 模型不可用，请手动运行 scripts/download_embedding.py 下载或在 .env 中配置 LOCAL_EMBEDDING_MODEL")
+        return False
+
+
+    # --- Ensure local LLM model exists (if using local LLM) -----------------------
+    def _ensure_local_llm(project_root: str) -> bool:
+        """Ensure LOCAL_MODEL_PATH exists. If not, try to find a GGUF under ./models and set it.
+
+        If a local model is still not found, suggest running scripts/download_model.py.
+        """
+        if os.getenv("USE_LOCAL_LLM", "false").lower() != "true":
+            return True
+
+        model_path = os.getenv("LOCAL_MODEL_PATH")
+        if model_path and os.path.exists(model_path):
+            print(f"LLM: 使用 LOCAL_MODEL_PATH={model_path}")
+            return True
+
+        # search repo models/ for .gguf
+        models_dir = os.path.join(project_root, 'models')
+        if os.path.exists(models_dir):
+            for fn in os.listdir(models_dir):
+                if fn.lower().endswith('.gguf'):
+                    candidate = os.path.join(models_dir, fn)
+                    print(f"LLM: 在 {models_dir} 发现 GGUF 模型: {candidate}，将临时使用该路径。")
+                    os.environ['LOCAL_MODEL_PATH'] = candidate
+                    return True
+
+        # no local model found — try helper script
+        helper = os.path.join(project_root, 'scripts', 'download_model.py')
+        if os.path.exists(helper):
+            print("\n⚙️ 未检测到本地 LLM 模型，尝试运行 scripts/download_model.py 来帮助配置（不会自动下载大模型）。")
+            try:
+                subprocess.run([sys.executable, helper], check=False)
+            except Exception:
+                pass
+
+        model_path = os.getenv("LOCAL_MODEL_PATH")
+        if model_path and os.path.exists(model_path):
+            print(f"LLM: 已配置 LOCAL_MODEL_PATH={model_path}")
+            return True
+
+        print("❌ 本地 LLM 模型仍不可用。请将 GGUF 模型放入项目的 models/ 目录，或在 .env 中设置 LOCAL_MODEL_PATH。")
+        return False
+
     
     # 检查数据文件是否存在
     if not os.path.exists(args.data_file):
@@ -617,6 +734,15 @@ def main():
     
     print("=" * 70 + "\n")
     
+    # 确保 embedding 可用
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if not _ensure_embedding_available(project_root):
+        return
+
+    # 确保本地LLM（如使用）可用或已提示用户
+    if not _ensure_local_llm(project_root):
+        return
+
     # 创建评估器
     evaluator = LoCoMoEvaluator(args.data_file)
     
