@@ -38,6 +38,18 @@ def parse_json_response(response_text: str, expected_key: Optional[str] = None) 
     """
     if not response_text:
         return []
+    
+    # 预处理：去除常见的非JSON前缀和后缀
+    response_text = response_text.strip()
+    
+    # 移除markdown代码块标记
+    if response_text.startswith('```json'):
+        response_text = response_text[7:]
+    if response_text.startswith('```'):
+        response_text = response_text[3:]
+    if response_text.endswith('```'):
+        response_text = response_text[:-3]
+    response_text = response_text.strip()
         
     # 方法1: 尝试直接解析JSON
     try:
@@ -50,6 +62,18 @@ def parse_json_response(response_text: str, expected_key: Optional[str] = None) 
     
     # 方法2: 查找包含特定键的JSON对象（支持多行）
     if expected_key:
+        try:
+            # 尝试更宽松的匹配 - 找到第一个 { 和最后一个 }
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                json_str = response_text[start_idx:end_idx+1]
+                data = json.loads(json_str)
+                if expected_key in data:
+                    return data.get(expected_key, [])
+        except Exception:
+            pass
+        
         try:
             json_match = re.search(
                 r'\{[^{}]*"' + expected_key + r'"[^{}]*\}', 

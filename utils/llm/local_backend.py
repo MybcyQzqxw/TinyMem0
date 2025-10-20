@@ -120,8 +120,16 @@ class LocalLLM:
             生成的文本
         """
         try:
+            # 增强JSON输出约束：如果system消息包含JSON要求，添加额外约束
+            enhanced_messages = messages.copy()
+            if enhanced_messages and enhanced_messages[0]['role'] == 'system':
+                system_content = enhanced_messages[0]['content']
+                if 'json' in system_content.lower() or 'JSON' in system_content:
+                    # 添加更强的JSON输出约束
+                    enhanced_messages[0]['content'] = system_content + "\n\nCRITICAL: You MUST respond ONLY with valid JSON. Start with { and end with }. Do NOT include any text before or after the JSON object. Do NOT add explanations or comments."
+            
             response = self.llm.create_chat_completion(
-                messages=messages,
+                messages=enhanced_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p

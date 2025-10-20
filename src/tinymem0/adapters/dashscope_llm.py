@@ -54,13 +54,17 @@ def call_llm_with_prompt(model: str, system_prompt: str, user_content: str) -> O
         try:
             from utils.llm import get_local_llm
             llm = get_local_llm()
+            
+            # 检查是否需要JSON输出，如果是则降低温度以获得更确定性的输出
+            temp = 0.3 if ('json' in system_prompt.lower() or 'JSON' in system_prompt) else 0.7
+            
             return llm.chat(
                 messages=[
                     {'role': 'system', 'content': system_prompt},
                     {'role': 'user', 'content': user_content}
                 ],
                 max_tokens=1024,
-                temperature=0.7
+                temperature=temp
             )
         except Exception as e:
             print(f"本地LLM调用异常: {e}")
