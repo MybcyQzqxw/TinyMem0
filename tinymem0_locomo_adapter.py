@@ -486,9 +486,24 @@ def main():
     args = parser.parse_args()
     
     # 检查必要的环境变量
-    if not os.getenv("DASHSCOPE_API_KEY"):
-        print("Error: DASHSCOPE_API_KEY environment variable is required")
-        return
+    use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
+    
+    if use_local_llm:
+        # 使用本地LLM，检查模型路径
+        if not os.getenv("LOCAL_MODEL_PATH"):
+            print("Error: LOCAL_MODEL_PATH environment variable is required when USE_LOCAL_LLM=true")
+            return
+        model_path = os.getenv("LOCAL_MODEL_PATH")
+        if not os.path.exists(model_path):
+            print(f"Error: Model file not found: {model_path}")
+            return
+        print(f"Using local LLM: {model_path}")
+    else:
+        # 使用阿里云API，检查API密钥
+        if not os.getenv("DASHSCOPE_API_KEY"):
+            print("Error: DASHSCOPE_API_KEY environment variable is required when USE_LOCAL_LLM=false")
+            return
+        print("Using Alibaba Cloud API")
     
     # 检查数据文件是否存在
     if not os.path.exists(args.data_file):
