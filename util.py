@@ -30,7 +30,7 @@ def extract_llm_response_content(response) -> Optional[str]:
 
 def parse_json_response(response_text: str, expected_key: str = None) -> List[Dict]:
     """
-    解析LLM的JSON响应
+    解析LLM的JSON响应，支持多种格式提取
     
     Args:
         response_text: LLM返回的文本
@@ -39,6 +39,9 @@ def parse_json_response(response_text: str, expected_key: str = None) -> List[Di
     Returns:
         解析后的数据列表
     """
+    if not response_text:
+        return []
+        
     try:
         # 尝试直接解析JSON
         data = json.loads(response_text)
@@ -46,25 +49,56 @@ def parse_json_response(response_text: str, expected_key: str = None) -> List[Di
             return data.get(expected_key, [])
         return data
     except json.JSONDecodeError:
-        # 如果直接解析失败，尝试提取JSON部分
-        try:
-            # 查找JSON对象
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group()
-                # 将字符串转换为 Python 对象
-                data = json.loads(json_str)
-                if expected_key:
-                    return data.get(expected_key, [])
-                # 未添加 expected_key 则返回整个数据
+        pass
+    
+    # 方法1: 查找JSON对象（支持多行）
+    try:
+        json_match = re.search(r'\{[^{}]*"' + (expected_key or 'facts') + r'"[^{}]*\}', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group()
+            data = json.loads(json_str)
+            if expected_key:
+                return data.get(expected_key, [])
+            return data
+    except Exception:
+        pass
+    
+    # 方法2: 查找任意JSON对象
+    try:
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group()
+            data = json.loads(json_str)
+            if expected_key:
+                return data.get(expected_key, [])
+            return data
+    except Exception:
+        pass
+    
+    # 方法3: 查找JSON数组
+    try:
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group()
+            data = json.loads(json_str)
+            if isinstance(data, list):
                 return data
-            else:
-                print(f"无法找到JSON内容: {response_text}")
-                return []
-        except Exception as e:
-            print(f"JSON解析失败: {response_text}")
-            print(f"解析错误: {e}")
-            return []
+    except Exception:
+        pass
+    
+    # 方法4: 尝试从文本中提取引号内容作为facts（本地LLM回退方案）
+    if expected_key == 'facts':
+        try:
+            # 查找所有引号内的内容
+            facts = re.findall(r'"([^"]+)"', response_text)
+            if facts:
+                print(f"警告: 从非JSON格式中提取了 {len(facts)} 个facts")
+                return facts
+        except Exception:
+            pass
+    
+    print(f"无法找到有效JSON内容: {response_text[:200]}...")
+    return []
 
 
 def extract_embedding_from_response(response) -> List[float]:

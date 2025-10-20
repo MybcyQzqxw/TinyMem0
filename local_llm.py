@@ -67,9 +67,14 @@ class LocalLLM:
             生成的文本
         """
         try:
+            # 如果system_prompt包含JSON要求，添加额外的JSON约束
+            enhanced_system = system_prompt
+            if 'json' in system_prompt.lower() or 'JSON' in system_prompt:
+                enhanced_system = system_prompt + "\n\nIMPORTANT: You MUST respond with valid JSON only. Do not include any explanatory text before or after the JSON object."
+            
             # 构建完整的prompt
             prompt = f"""<|im_start|>system
-{system_prompt}<|im_end|>
+{enhanced_system}<|im_end|>
 <|im_start|>user
 {user_content}<|im_end|>
 <|im_start|>assistant
