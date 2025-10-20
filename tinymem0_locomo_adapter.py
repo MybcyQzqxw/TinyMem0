@@ -9,7 +9,7 @@ TinyMem0 与 LoCoMo 基准测试的适配器
 import json
 import os
 import sys
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from tqdm import tqdm
 import argparse
@@ -89,7 +89,7 @@ class TinyMem0LoCoMoAdapter:
                     print(f"Error processing dialog {dialog.get('dia_id', 'unknown')}: {e}")
                     continue
     
-    def answer_question(self, question: str, context_limit: int = 10) -> tuple[str, List[str]]:
+    def answer_question(self, question: str, context_limit: int = 10) -> Tuple[str, List[str]]:
         """
         基于记忆系统回答问题
         
