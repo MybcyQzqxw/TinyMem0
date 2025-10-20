@@ -319,20 +319,51 @@ pip install sentence-transformers>=2.2.0
 
 ### 运行LoCoMo评测
 
+本项目提供统一的评测脚本 `scripts/evaluate_system.py`，支持评测不同的记忆系统模型。
+
+#### 快速开始
+
 ```bash
-# 1. 配置环境变量（使用本地LLM）
+# 1. 查看可用的模型系统
+python scripts/evaluate_system.py --list-models
+
+# 2. 快速测试（评测5个样本）
+python scripts/evaluate_system.py --model tinymem0 --num-samples 5
+
+# 3. 完整评测（所有样本）
+python scripts/evaluate_system.py --model tinymem0
+```
+
+#### 配置环境（使用本地LLM）
+
+```bash
+# Windows PowerShell
 $env:USE_LOCAL_LLM = "true"
 $env:LOCAL_MODEL_PATH = "path/to/model.gguf"
 $env:LOCAL_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
 
-# 2. 运行评测脚本
-python scripts/evaluate_system.py
-
-# 或指定样本数量
-python scripts/evaluate_system.py --num-samples 5
+# Linux/Mac
+export USE_LOCAL_LLM=true
+export LOCAL_MODEL_PATH=path/to/model.gguf
+export LOCAL_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
 ```
 
-评测结果将打印所有QA和Evidence/Retrieval指标的统计信息。
+#### 高级用法
+
+```bash
+# 评测指定样本
+python scripts/evaluate_system.py --model tinymem0 --sample-ids sample_001 sample_002
+
+# 自定义输出文件
+python scripts/evaluate_system.py --model tinymem0 -o my_results.json
+
+# 使用自定义数据集
+python scripts/evaluate_system.py --model tinymem0 --data-file locomo/data/custom.json
+```
+
+详细使用说明请参考 [评测系统使用指南](docs/EVALUATION_GUIDE.md)。
+
+评测结果将保存为 JSON 文件，包含所有 QA 和 Evidence/Retrieval 指标的详细统计信息。
 
 ## 贡献学习
 

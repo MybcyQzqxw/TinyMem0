@@ -2,8 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-TinyMem0 记忆系统评测脚本
-用于在评测数据集上验证记忆系统的性能，包括QA和Evidence检索指标
+记忆系统评测脚本
+用于在 LoCoMo 数据集上评测各种记忆系统的性能，包括QA和Evidence检索指标
+
+支持的模型系统：
+- tinymem0: TinyMem0 记忆系统
+- (未来可扩展其他模型)
+
+使用方法：
+    python scripts/evaluate_system.py --model tinymem0 --num-samples 5
 """
 
 import json
@@ -13,18 +20,35 @@ from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from tqdm import tqdm
 import argparse
+from importlib import import_module
 
 # 添加项目根目录和src目录到路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, 'src'))
 
-from tinymem0 import MemorySystem
 from locomo.task_eval.evaluation import eval_question_answering, f1_score, exact_match_score
 from dotenv import load_dotenv
 
 # 加载环境变量
 load_dotenv()
+
+# 模型系统映射表
+AVAILABLE_MODELS = {
+    'tinymem0': {
+        'name': 'TinyMem0',
+        'description': 'TinyMem0 记忆系统 (支持本地LLM和阿里云API)',
+        'module': 'tinymem0',
+        'class': 'MemorySystem'
+    },
+    # 未来可以添加更多模型，例如：
+    # 'mem0ai': {
+    #     'name': 'Mem0.ai',
+    #     'description': 'Mem0.ai 官方实现',
+    #     'module': 'mem0ai',
+    #     'class': 'MemorySystem'
+    # },
+}
 
 class MemorySystemEvaluator:
     """
@@ -32,7 +56,13 @@ class MemorySystemEvaluator:
     负责将对话数据输入记忆系统，并评估QA和Evidence检索性能
     """
     
-    def __init__(self, memory_system: MemorySystem, user_id: str = "eval_user", agent_id: str = "eval_agent"):
+    def __init__(self, memory_system: Any, user_id: str = "eval_user", agent_id: str = "eval_agent"):
+        """
+        Args:
+            memory_system: 任意记忆系统实例（支持 write_memory 和 search_memory 接口）
+            user_id: 评测用户ID
+            agent_id: 评测代理ID
+        """
         self.memory_system = memory_system
         self.user_id = user_id
         self.agent_id = agent_id
@@ -324,19 +354,39 @@ class LoCoMoEvaluator:
         with open(self.data_file, 'r', encoding='utf-8') as f:
             return json.load(f)
     
-    def evaluate_tinymem0(self, output_file: str, sample_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    def evaluate_memory_system(self, model_name: str, output_file: str, sample_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        使用TinyMem0评估LoCoMo基准测试
+        评估指定的记忆系统模型
         
         Args:
+            model_name: 模型名称 (例如: 'tinymem0')
             output_file: 结果输出文件路径
             sample_ids: 要评估的样本ID列表（None表示评估所有样本）
             
         Returns:
             评估结果统计
         """
-        # 初始化TinyMem0记忆系统
-        memory_system = MemorySystem(
+        # 动态加载模型系统
+        if model_name not in AVAILABLE_MODELS:
+            raise ValueError(f"Unknown model: {model_name}. Available models: {list(AVAILABLE_MODELS.keys())}")
+        
+        model_config = AVAILABLE_MODELS[model_name]
+        print(f"\n{'='*60}")
+        print(f"评估模型: {model_config['name']}")
+        print(f"描述: {model_config['description']}")
+        print(f"{'='*60}\n")
+        
+        # 动态导入模型类
+        try:
+            module = import_module(model_config['module'])
+            MemorySystemClass = getattr(module, model_config['class'])
+        except (ImportError, AttributeError) as e:
+            print(f"Error: Failed to load model {model_name}: {e}")
+            print(f"Please ensure the module '{model_config['module']}' is properly installed in src/")
+            return {}
+        
+        # 初始化记忆系统
+        memory_system = MemorySystemClass(
             log_level="info",
             log_mode="plain"
         )
@@ -366,7 +416,7 @@ class LoCoMoEvaluator:
             try:
                 # 为每个样本创建新的记忆系统实例（避免样本间干扰）
                 sample_id = sample.get('sample_id', 'unknown')
-                sample_memory_system = MemorySystem(
+                sample_memory_system = MemorySystemClass(
                     collection_name=f"memories_{sample_id}",
                     log_level="warn",  # 减少日志输出
                     qdrant_path=f"./qdrant_data_{sample_id}"  # 为每个样本使用独立的数据目录
@@ -470,42 +520,102 @@ class LoCoMoEvaluator:
         return output_data
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate TinyMem0 on LoCoMo benchmark")
+    """命令行入口"""
+    parser = argparse.ArgumentParser(
+        description="在 LoCoMo 数据集上评测记忆系统模型",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+可用的模型系统：
+  tinymem0    - TinyMem0 记忆系统 (支持本地LLM和阿里云API)
+
+示例用法：
+  # 评测 TinyMem0 模型，使用默认数据集，评测5个样本
+  python scripts/evaluate_system.py --model tinymem0 --num-samples 5
+  
+  # 评测所有样本，保存到指定文件
+  python scripts/evaluate_system.py --model tinymem0 --output-file results.json
+  
+  # 评测指定的样本ID
+  python scripts/evaluate_system.py --model tinymem0 --sample-ids sample_001 sample_002
+        """
+    )
+    
+    # 必选参数（除非使用 --list-models）
+    parser.add_argument('--model', '-m', type=str,
+                       choices=list(AVAILABLE_MODELS.keys()),
+                       help='要评测的模型系统名称')
+    
+    # 可选参数
     parser.add_argument('--data-file', type=str, default='locomo/data/locomo10.json',
-                       help='Path to LoCoMo data file')
-    parser.add_argument('--output-file', type=str, default='tinymem0_locomo_results.json',
-                       help='Output file for evaluation results')
+                       help='LoCoMo 数据文件路径 (默认: locomo/data/locomo10.json)')
+    parser.add_argument('--output-file', '-o', type=str, default=None,
+                       help='评测结果输出文件 (默认: {model}_locomo_results.json)')
     parser.add_argument('--sample-ids', type=str, nargs='*',
-                       help='Specific sample IDs to evaluate (default: all)')
-    parser.add_argument('--num-samples', type=int, default=None,
-                       help='Number of samples to evaluate (for testing)')
+                       help='指定要评测的样本ID列表 (默认: 评测所有样本)')
+    parser.add_argument('--num-samples', '-n', type=int, default=None,
+                       help='限制评测的样本数量，用于快速测试 (默认: 评测所有样本)')
+    parser.add_argument('--list-models', action='store_true',
+                       help='列出所有可用的模型系统')
     
     args = parser.parse_args()
+    
+    # 如果请求列出模型，显示后退出
+    if args.list_models:
+        print("\n可用的记忆系统模型：")
+        print("=" * 70)
+        for model_id, config in AVAILABLE_MODELS.items():
+            print(f"\n{model_id:15} - {config['name']}")
+            print(f"{'':15}   {config['description']}")
+            print(f"{'':15}   模块: {config['module']}.{config['class']}")
+        print("\n" + "=" * 70)
+        return
+    
+    # 如果不是列出模型，则 --model 参数是必需的
+    if not args.model:
+        parser.error("评测模式下 --model/-m 参数是必需的。使用 --list-models 查看可用模型。")
+    
+    # 设置默认输出文件名
+    if args.output_file is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        args.output_file = f"{args.model}_locomo_results_{timestamp}.json"
     
     # 检查必要的环境变量
     use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
     
+    print("\n" + "=" * 70)
+    print("记忆系统评测配置")
+    print("=" * 70)
+    print(f"模型系统: {AVAILABLE_MODELS[args.model]['name']}")
+    print(f"数据文件: {args.data_file}")
+    print(f"输出文件: {args.output_file}")
+    
     if use_local_llm:
         # 使用本地LLM，检查模型路径
         if not os.getenv("LOCAL_MODEL_PATH"):
-            print("Error: LOCAL_MODEL_PATH environment variable is required when USE_LOCAL_LLM=true")
+            print("\n❌ 错误: 使用本地LLM时必须设置 LOCAL_MODEL_PATH 环境变量")
+            print("请在 .env 文件中配置：LOCAL_MODEL_PATH=/path/to/your/model.gguf")
             return
         model_path = os.getenv("LOCAL_MODEL_PATH")
         if model_path and not os.path.exists(model_path):
-            print(f"Error: Model file not found: {model_path}")
+            print(f"\n❌ 错误: 找不到模型文件: {model_path}")
             return
-        print(f"Using local LLM: {model_path}")
+        print(f"LLM模式: 本地模型")
+        print(f"模型路径: {model_path}")
     else:
         # 使用阿里云API，检查API密钥
         if not os.getenv("DASHSCOPE_API_KEY"):
-            print("Error: DASHSCOPE_API_KEY environment variable is required when USE_LOCAL_LLM=false")
+            print("\n❌ 错误: 使用阿里云API时必须设置 DASHSCOPE_API_KEY 环境变量")
+            print("请在 .env 文件中配置：DASHSCOPE_API_KEY=your_api_key")
             return
-        print("Using Alibaba Cloud API")
+        print(f"LLM模式: 阿里云 Dashscope API")
     
     # 检查数据文件是否存在
     if not os.path.exists(args.data_file):
-        print(f"Error: Data file {args.data_file} not found")
+        print(f"\n❌ 错误: 找不到数据文件 {args.data_file}")
+        print("请确保 LoCoMo 数据集已下载并放在正确的位置")
         return
+    
+    print("=" * 70 + "\n")
     
     # 创建评估器
     evaluator = LoCoMoEvaluator(args.data_file)
@@ -514,11 +624,31 @@ def main():
     sample_ids = args.sample_ids
     if args.num_samples and not sample_ids:
         sample_ids = [s['sample_id'] for s in evaluator.samples[:args.num_samples]]
+        print(f"📊 将评测前 {args.num_samples} 个样本\n")
+    elif sample_ids:
+        print(f"📊 将评测指定的 {len(sample_ids)} 个样本\n")
+    else:
+        print(f"📊 将评测所有 {len(evaluator.samples)} 个样本\n")
     
     # 运行评估
-    results = evaluator.evaluate_tinymem0(args.output_file, sample_ids)
-    
-    return results
+    try:
+        results = evaluator.evaluate_memory_system(args.model, args.output_file, sample_ids)
+        
+        if results:
+            print("\n✅ 评测完成！")
+            return results
+        else:
+            print("\n❌ 评测失败")
+            return None
+            
+    except KeyboardInterrupt:
+        print("\n\n⚠️  评测被用户中断")
+        return None
+    except Exception as e:
+        print(f"\n❌ 评测过程中发生错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 if __name__ == "__main__":
     main()
