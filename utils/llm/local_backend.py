@@ -1,13 +1,19 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
-本地LLM接口模块
+本地LLM后端模块
 支持使用llama-cpp-python加载GGUF模型文件
+提供本地大语言模型的推理接口
 """
+
 import os
 from typing import Optional, List, Dict
 from llama_cpp import Llama
 
+
 class LocalLLM:
-    """本地GGUF模型加载器"""
+    """本地GGUF模型加载器和推理引擎"""
     
     def __init__(self, model_path: Optional[str] = None, n_ctx: int = 4096, n_gpu_layers: int = -1, verbose: bool = False):
         """
@@ -130,14 +136,16 @@ class LocalLLM:
             return None
 
 
-# 全局LLM实例
+# 全局LLM实例（单例模式）
 _llm_instance: Optional[LocalLLM] = None
+
 
 def get_local_llm(model_path: Optional[str] = None, 
                   n_ctx: int = 4096, 
                   n_gpu_layers: int = -1) -> LocalLLM:
     """
     获取全局LLM实例（单例模式）
+    避免重复加载模型，节省内存
     
     Args:
         model_path: 模型路径

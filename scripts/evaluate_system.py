@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-TinyMem0 与 LoCoMo 基准测试的适配器
-用于在 LoCoMo 数据集上评估 TinyMem0 记忆系统的性能
+TinyMem0 记忆系统评测脚本
+用于在评测数据集上验证记忆系统的性能，包括QA和Evidence检索指标
 """
 
 import json
@@ -14,23 +14,25 @@ from datetime import datetime
 from tqdm import tqdm
 import argparse
 
-# 添加项目根目录到路径
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# 添加项目根目录和src目录到路径
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+sys.path.insert(0, os.path.join(project_root, 'src'))
 
-from memory_system import MemorySystem
+from tinymem0 import MemorySystem
 from locomo.task_eval.evaluation import eval_question_answering, f1_score, exact_match_score
 from dotenv import load_dotenv
 
 # 加载环境变量
 load_dotenv()
 
-class TinyMem0LoCoMoAdapter:
+class MemorySystemEvaluator:
     """
-    TinyMem0-LoCoMo 适配器
-    负责将LoCoMo对话数据输入TinyMem0记忆系统，并回答LoCoMo的QA问题
+    记忆系统评测器
+    负责将对话数据输入记忆系统，并评估QA和Evidence检索性能
     """
     
-    def __init__(self, memory_system: MemorySystem, user_id: str = "locomo_user", agent_id: str = "locomo_agent"):
+    def __init__(self, memory_system: MemorySystem, user_id: str = "eval_user", agent_id: str = "eval_agent"):
         self.memory_system = memory_system
         self.user_id = user_id
         self.agent_id = agent_id
@@ -130,19 +132,14 @@ class TinyMem0LoCoMoAdapter:
             context = "\n".join(context_parts)
             
             # 使用LLM回答问题
-            from util import call_llm_with_prompt
+            from tinymem0.adapters import call_llm_with_prompt
+            from tinymem0.prompts import QA_SYSTEM_PROMPT, build_qa_prompt
             
-            qa_prompt = f"""Based on the following memory records, answer the question as accurately and concisely as possible. If the answer cannot be determined from the given memories, respond with "No information available".
-
-Memory Records:
-{context}
-
-Question: {question}
-Answer:"""
+            qa_prompt = build_qa_prompt(context, question)
             
             answer = call_llm_with_prompt(
                 self.memory_system.llm_model,
-                "You are a helpful assistant that answers questions based on given memory records.",
+                QA_SYSTEM_PROMPT,
                 qa_prompt
             )
             
@@ -223,7 +220,7 @@ Answer:"""
         计算多答案的F1分数（用于category 1的问题）
         """
         from locomo.task_eval.evaluation import f1
-        return f1(prediction, ground_truth)
+        return float(f1(prediction, ground_truth))
     
     def _calculate_evidence_metrics(self, retrieved_evidence: List[str], gold_evidence: List[str]) -> Dict[str, float]:
         """
@@ -344,8 +341,8 @@ class LoCoMoEvaluator:
             log_mode="plain"
         )
         
-        # 创建适配器
-        adapter = TinyMem0LoCoMoAdapter(memory_system)
+        # 创建评测器
+        evaluator = MemorySystemEvaluator(memory_system)
         
         # 筛选要评估的样本
         eval_samples = self.samples
@@ -374,10 +371,10 @@ class LoCoMoEvaluator:
                     log_level="warn",  # 减少日志输出
                     qdrant_path=f"./qdrant_data_{sample_id}"  # 为每个样本使用独立的数据目录
                 )
-                sample_adapter = TinyMem0LoCoMoAdapter(sample_memory_system)
+                sample_evaluator = MemorySystemEvaluator(sample_memory_system)
                 
                 # 评估样本
-                result = sample_adapter.evaluate_qa_sample(sample)
+                result = sample_evaluator.evaluate_qa_sample(sample)
                 all_results.append(result)
                 
                 # 收集统计信息
@@ -494,7 +491,7 @@ def main():
             print("Error: LOCAL_MODEL_PATH environment variable is required when USE_LOCAL_LLM=true")
             return
         model_path = os.getenv("LOCAL_MODEL_PATH")
-        if not os.path.exists(model_path):
+        if model_path and not os.path.exists(model_path):
             print(f"Error: Model file not found: {model_path}")
             return
         print(f"Using local LLM: {model_path}")

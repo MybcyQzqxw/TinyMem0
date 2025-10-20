@@ -4,9 +4,15 @@
 """
 记忆系统使用示例
 """
+import sys
+from pathlib import Path
+
+# 添加项目src目录到路径
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+
 from dotenv import load_dotenv
 load_dotenv()
-from memory_system import MemorySystem
+from tinymem0 import MemorySystem
 
 def main():
     """主函数 - 演示记忆系统的使用"""

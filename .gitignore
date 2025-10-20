@@ -90,5 +90,5 @@ temp/
 *~
 
 # Models
-models/
-embedding_models/
+/models/
+/embedding_models/

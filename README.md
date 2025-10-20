@@ -63,14 +63,28 @@ cp .env.example .env
 ### 2. 安装依赖
 
 ```bash
-# 基础依赖
+# 安装所有依赖（包含评测所需）
 pip install -r requirements.txt
-
-# LoCoMo评测依赖（可选）
-pip install -r requirements_locomo.txt
 ```
 
-### 3. 配置Qdrant
+### 3. 下载嵌入模型（使用本地LLM时需要）
+
+使用交互式脚本下载嵌入模型：
+
+```bash
+# 推荐：交互式模式，有友好界面
+python scripts/download_embedding.py
+
+# 或使用命令行模式，快速下载预定义模型
+python scripts/download_embedding.py --model-id 1
+
+# 查看所有可用模型
+python scripts/download_embedding.py --list
+```
+
+详见 `scripts/README.md` 获取更多信息。
+
+### 5. 配置Qdrant
 
 系统使用Qdrant的本地文件存储模式，无需Docker服务：
 
@@ -79,7 +93,7 @@ pip install -r requirements_locomo.txt
 # 系统会自动创建该目录
 ```
 
-### 4. 配置API密钥（仅在使用阿里云API时需要）
+### 6. 配置API密钥（仅在使用阿里云API时需要）
 
 **注意**: 使用阿里云API模式时需配置密钥，使用本地LLM时可跳过：
 
@@ -89,10 +103,22 @@ DASHSCOPE_API_KEY=your_actual_api_key_here
 
 ## 学习使用方法
 
+### 安装
+
+使用标准的Python包安装方式：
+
+```bash
+# 开发模式安装（推荐用于学习）
+pip install -e .
+
+# 或直接安装
+pip install .
+```
+
 ### 基本使用示例
 
 ```python
-from memory_system import MemorySystem
+from tinymem0 import MemorySystem
 
 # 初始化记忆系统
 memory_system = MemorySystem()
@@ -118,7 +144,7 @@ for result in results:
 ### 运行学习示例
 
 ```bash
-python example.py
+python examples/basic_usage.py
 ```
 
 ## 学习架构分析
@@ -126,12 +152,34 @@ python example.py
 ### 文件结构
 
 ```text
-mini_mem/
-├── memory_system.py      # 核心记忆系统 - 学习重点
-├── prompt.py            # Prompt定义和管理 - 学习LLM应用
-├── example.py           # 使用示例 - 学习如何使用
-├── requirements.txt     # 依赖包
-└── README.md           # 详细文档
+TinyMem0/                           # 项目根目录
+├── src/                            # 源代码目录（标准Python项目结构）
+│   └── tinymem0/                   # 主包
+│       ├── __init__.py             # 包初始化，导出主要接口
+│       ├── memory_system.py        # 核心记忆系统 - 学习重点
+│       ├── prompts/                # Prompt定义目录 - 集中管理所有Prompt
+│       │   ├── __init__.py         # 统一导出接口
+│       │   ├── fact_extraction.py  # 事实提取Prompt
+│       │   ├── memory_processing.py # 记忆处理Prompt
+│       │   └── question_answering.py # 问答系统Prompt
+│       └── utils/                  # 工具模块 - 通用功能
+│           ├── __init__.py         # 统一导出接口
+│           ├── llm_utils.py        # LLM调用和JSON解析
+│           ├── local_llm_backend.py # 本地GGUF模型后端
+│           ├── embedding_utils.py  # 嵌入向量工具
+│           └── evaluation_utils.py # 评测指标计算
+├── scripts/                        # 实用脚本
+│   ├── __init__.py
+│   ├── download_embedding.py       # 嵌入模型下载工具
+│   └── evaluate_system.py          # 记忆系统评测脚本
+├── examples/                       # 使用示例
+│   └── basic_usage.py              # 基础使用示例 - 学习如何使用
+├── locomo/                         # 评测数据集
+│   └── ...                         # 评测相关文件
+├── .env.example                    # 环境变量模板
+├── requirements.txt                # 统一依赖管理
+├── setup.py                        # 安装配置（支持pip install）
+└── README.md                       # 项目文档
 ```
 
 ### 核心学习组件
@@ -272,15 +320,16 @@ pip install sentence-transformers>=2.2.0
 ### 运行LoCoMo评测
 
 ```bash
-# 1. 安装评测依赖
-pip install -r requirements_locomo.txt
-
-# 2. 配置环境变量（使用本地LLM）
+# 1. 配置环境变量（使用本地LLM）
 $env:USE_LOCAL_LLM = "true"
 $env:LOCAL_MODEL_PATH = "path/to/model.gguf"
+$env:LOCAL_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
 
-# 3. 运行评测脚本
-python tinymem0_locomo_adapter.py
+# 2. 运行评测脚本
+python scripts/evaluate_system.py
+
+# 或指定样本数量
+python scripts/evaluate_system.py --num-samples 5
 ```
 
 评测结果将打印所有QA和Evidence/Retrieval指标的统计信息。

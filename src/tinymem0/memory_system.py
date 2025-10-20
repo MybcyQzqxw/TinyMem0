@@ -9,9 +9,11 @@ import dashscope
 from dashscope import Generation
 
 # 导入prompt模块
-from prompt import FACT_EXTRACTION_PROMPT, MEMORY_PROCESSING_PROMPT
-# 导入工具函数
-from util import extract_llm_response_content, parse_json_response, extract_embedding_from_response, call_llm_with_prompt, handle_llm_error
+from .prompts import FACT_EXTRACTION_PROMPT, MEMORY_PROCESSING_PROMPT
+# 导入适配器（TinyMem0特定）
+from .adapters import extract_llm_response_content, call_llm_with_prompt, handle_llm_error, extract_embedding_from_response
+# 导入通用工具
+from utils.llm import parse_json_response
 
 class MemorySystem:
     def __init__(self, collection_name: str = "memories", llm_model: str = "qwen-turbo", embedding_model: str = "text-embedding-v1", log_mode: Optional[str] = None, log_level: Optional[str] = None, log_file: Optional[str] = None, qdrant_path: Optional[str] = None):
@@ -99,7 +101,10 @@ class MemorySystem:
         self._log_event("facts_extract_start", level="debug")
         result = call_llm_with_prompt(self.llm_model, FACT_EXTRACTION_PROMPT, conversation)
         if result:
-            return parse_json_response(result, 'facts')
+            parsed = parse_json_response(result, 'facts')
+            # 确保返回的是列表
+            if isinstance(parsed, list):
+                return parsed
         return []
      
     
@@ -123,8 +128,17 @@ class MemorySystem:
                 # 使用全局嵌入模型实例
                 if not hasattr(self, '_embedding_model_instance'):
                     model_name = os.getenv("LOCAL_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
-                    self._log_event("loading_embedding_model", model=model_name, level="info")
-                    self._embedding_model_instance = SentenceTransformer(model_name)
+                    
+                    # 检查是否是本地路径
+                    if os.path.exists(model_name):
+                        self._log_event("loading_embedding_model", model=model_name, level="info")
+                        self._embedding_model_instance = SentenceTransformer(model_name)
+                    else:
+                        # 尝试从HuggingFace或本地缓存加载
+                        self._log_event("loading_embedding_model", model=model_name, level="info")
+                        print(f"正在加载嵌入模型: {model_name}")
+                        print("提示: 如果下载失败，请运行: python download_embedding_model.py")
+                        self._embedding_model_instance = SentenceTransformer(model_name)
                 
                 self._log_event("embedding_start", level="debug", op=operation)
                 embedding = self._embedding_model_instance.encode(text, normalize_embeddings=True)
@@ -191,12 +205,14 @@ class MemorySystem:
             
             memories = []
             for result in search_result:
-                memories.append({
-                    "id": result.id,
-                    "text": result.payload.get("data", ""),
-                    "score": result.score,
-                    "metadata": result.payload.get("metadata", {})
-                })
+                # 类型守卫：确保 payload 不为 None
+                if result.payload is not None:
+                    memories.append({
+                        "id": result.id,
+                        "text": result.payload.get("data", ""),
+                        "score": result.score,
+                        "metadata": result.payload.get("metadata", {})
+                    })
             
             self._log_event("search_ok", query=query, result_count=len(memories), level="debug")
             return memories
@@ -230,9 +246,11 @@ class MemorySystem:
             )
             
             if result:
-                return parse_json_response(result, 'memory')
-            else:
-                return []
+                parsed = parse_json_response(result, 'memory')
+                # 确保返回的是列表
+                if isinstance(parsed, list):
+                    return parsed
+            return []
         except Exception as e:
             self._log_event("process_error", error=str(e), level="error")
             return []
@@ -320,7 +338,7 @@ class MemorySystem:
         except Exception as e:
             self._log_event("delete_error", error=str(e), level="error")
     
-    def write_memory(self, conversation: str, user_id: str = None, agent_id: str = None, extra_metadata: Dict = None):
+    def write_memory(self, conversation: str, user_id: Optional[str] = None, agent_id: Optional[str] = None, extra_metadata: Optional[Dict] = None):
         """
         记忆写入主流程
         
@@ -379,18 +397,24 @@ class MemorySystem:
                 metadata.update(extra_metadata)
             
             if event == "ADD":
-                self.add_memory(text, metadata)
-                self._log_event("memory_add", text=text, metadata=metadata, level="info")
+                # 类型守卫：确保 text 不为 None
+                if text:
+                    self.add_memory(text, metadata)
+                    self._log_event("memory_add", text=text, metadata=metadata, level="info")
             elif event == "UPDATE":
-                self.update_memory(memory_id, text, metadata)
-                self._log_event("memory_update", id=memory_id, text=text, metadata=metadata, level="info")
+                # 类型守卫：确保 memory_id 和 text 不为 None
+                if memory_id and text:
+                    self.update_memory(memory_id, text, metadata)
+                    self._log_event("memory_update", id=memory_id, text=text, metadata=metadata, level="info")
             elif event == "DELETE":
-                self.delete_memory(memory_id)
-                self._log_event("memory_delete", id=memory_id, text=text, level="info")
+                # 类型守卫：确保 memory_id 不为 None
+                if memory_id:
+                    self.delete_memory(memory_id)
+                    self._log_event("memory_delete", id=memory_id, text=text, level="info")
             elif event == "NONE":
                 self._log_event("memory_none", id=memory_id, text=text, level="debug")
     
-    def search_memory(self, query: str, user_id: str = None, agent_id: str = None, limit: int = 5) -> List[Dict]:
+    def search_memory(self, query: str, user_id: Optional[str] = None, agent_id: Optional[str] = None, limit: int = 5) -> List[Dict]:
         """
         记忆搜索
         
