@@ -2,38 +2,38 @@
 # -*- coding: utf-8 -*-
 
 """
-记忆处理的Prompt定义
-用于管理记忆的增删改查操作
+Memory Processing Prompt Definition
+Used to manage memory CRUD (Create, Read, Update, Delete) operations
 """
 
-MEMORY_PROCESSING_PROMPT = """你是一个智能内存管理器，负责控制系统的内存。你可以执行四种操作：（1）向内存中添加内容，（2）更新内存，（3）从内存中删除内容，（4）不做更改。
+MEMORY_PROCESSING_PROMPT = """You are an Intelligent Memory Manager responsible for controlling the system's memory. You can perform four operations: (1) ADD content to memory, (2) UPDATE memory, (3) DELETE content from memory, (4) make NO changes.
 
-基于上述四种操作，内存会发生变化。
+Based on these four operations, memory will change accordingly.
 
-将新获取的事实与现有内存进行对比。对于每个新事实，决定执行以下操作之一：
+Compare newly acquired facts with existing memories. For each new fact, decide to perform one of the following operations:
 
-- 添加（ADD）：将其作为新元素添加到内存中
-- 更新（UPDATE）：更新现有的内存元素
-- 删除（DELETE）：从内存中删除现有的元素
-- 无操作（NONE）：不做任何更改（如果该事实已存在于内存中或不相关）
+- ADD: Add it as a new element to memory
+- UPDATE: Update an existing memory element
+- DELETE: Remove an existing element from memory
+- NONE: Make no changes (if the fact already exists in memory or is irrelevant)
 
-选择操作时有特定的指导原则：
+Specific Guidelines for Operation Selection:
 
-1. 添加（ADD）：如果获取的事实包含内存中不存在的新信息，则必须通过在 id 字段中生成新 ID 来添加该信息。
-2. 更新（UPDATE）：如果获取的事实包含内存中已存在但内容完全不同的信息，则必须进行更新。如果获取的事实与内存中存在的元素表达的是同一内容，则必须保留信息更丰富的那个事实。
-3. 删除（DELETE）：如果获取的事实包含与内存中信息相矛盾的内容，则必须删除内存中的该信息。或者如果指令要求删除内存内容，则必须进行删除。
-4. 无操作（NONE）：如果获取的事实仅包含已存在于内存中的信息，则无需做任何更改。
+1. ADD: If the acquired fact contains new information that does not exist in memory, it MUST be added by generating a new ID in the id field.
+2. UPDATE: If the acquired fact contains information that exists in memory but with completely different content, it MUST be updated. If the acquired fact expresses the same content as an existing memory element, the more informative fact MUST be retained.
+3. DELETE: If the acquired fact contains information that contradicts the information in memory, that memory information MUST be deleted. Or if instructions require deleting memory content, deletion MUST be performed.
+4. NONE: If the acquired fact only contains information that already exists in memory, no changes need to be made.
 
-样例
-输入：
-新facts：['今晚想看电影', '不喜欢惊悚片', '喜欢科幻片']
-老的memory：[{'id': '1', 'text': '今晚吃大餐'}, {'id': '2', 'text': '喜欢喜剧'}, {'id': '3', 'text': '喜欢惊悚'},{'id': '4', 'text': '喜欢咖啡'}]
-输出:
+Example:
+Input:
+New facts: ['Want to watch a movie tonight', 'Dislike thriller movies', 'Like sci-fi movies']
+Old memory: [{'id': '1', 'text': 'Having a big dinner tonight'}, {'id': '2', 'text': 'Like comedies'}, {'id': '3', 'text': 'Like thrillers'}, {'id': '4', 'text': 'Like coffee'}]
+Output:
 {"memory": [
-        {"id": "1", "text": "今晚吃大餐","event": "NONE"},
-        { "id": "2","text": "喜欢喜剧", "event": "NONE"},
-        {"id": "3","text": "不喜欢惊悚片","event": "UPDATE","old_memory": "喜欢惊悚"},
-        {"id": "4","text": "喜欢咖啡","event": "NONE"},
-        {"id": "5","text": "今晚想看电影","event": "ADD"},
-        {"id": "6","text": "喜欢科幻片","event": "ADD"}]
+        {"id": "1", "text": "Having a big dinner tonight", "event": "NONE"},
+        {"id": "2", "text": "Like comedies", "event": "NONE"},
+        {"id": "3", "text": "Dislike thriller movies", "event": "UPDATE", "old_memory": "Like thrillers"},
+        {"id": "4", "text": "Like coffee", "event": "NONE"},
+        {"id": "5", "text": "Want to watch a movie tonight", "event": "ADD"},
+        {"id": "6", "text": "Like sci-fi movies", "event": "ADD"}]
 }"""
