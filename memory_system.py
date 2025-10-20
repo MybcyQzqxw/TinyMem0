@@ -67,12 +67,21 @@ class MemorySystem:
         collection_names = [col.name for col in collections.collections]
         
         if self.collection_name not in collection_names:
+            # 确定向量维度
+            use_local = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
+            if use_local:
+                # 本地嵌入模型，默认使用bge-small-zh-v1.5的512维
+                vector_size = int(os.getenv("EMBEDDING_DIM", "512"))
+            else:
+                # 阿里云text-embedding-v1使用1536维
+                vector_size = 1536
+            
             # 创建新集合
             self.qdrant_client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
             )
-            self._log_event("init", message=f"创建集合: {self.collection_name}", level="info")
+            self._log_event("init", message=f"创建集合: {self.collection_name}, 向量维度: {vector_size}", level="info")
         else:
             self._log_event("init", message=f"使用现有集合: {self.collection_name}", level="info")
 
@@ -97,6 +106,7 @@ class MemorySystem:
     def get_embeddings(self, text: str, operation: str = "search") -> List[float]:
         """
         获取文本的向量嵌入
+        支持阿里云API和本地嵌入模型
         
         Args:
             text: 输入文本
@@ -105,19 +115,39 @@ class MemorySystem:
         Returns:
             向量嵌入
         """
-        try:
-            # 使用配置的embedding模型
-            self._log_event("embedding_start", level="debug", op=operation)
-            response = dashscope.TextEmbedding.call(
-                model=self.embedding_model,
-                input=text
-            )
-            emb = extract_embedding_from_response(response)
-            self._log_event("embedding_ok", level="debug", size=len(emb) if emb else 0)
-            return emb
-        except Exception as e:
-            self._log_event("embedding_error", error=str(e), level="error")
-            return []
+        use_local = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
+        
+        if use_local:
+            try:
+                from sentence_transformers import SentenceTransformer
+                # 使用全局嵌入模型实例
+                if not hasattr(self, '_embedding_model_instance'):
+                    model_name = os.getenv("LOCAL_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+                    self._log_event("loading_embedding_model", model=model_name, level="info")
+                    self._embedding_model_instance = SentenceTransformer(model_name)
+                
+                self._log_event("embedding_start", level="debug", op=operation)
+                embedding = self._embedding_model_instance.encode(text, normalize_embeddings=True)
+                emb = embedding.tolist()
+                self._log_event("embedding_ok", level="debug", size=len(emb))
+                return emb
+            except Exception as e:
+                self._log_event("embedding_error", error=str(e), level="error")
+                return []
+        else:
+            # 使用阿里云API
+            try:
+                self._log_event("embedding_start", level="debug", op=operation)
+                response = dashscope.TextEmbedding.call(
+                    model=self.embedding_model,
+                    input=text
+                )
+                emb = extract_embedding_from_response(response)
+                self._log_event("embedding_ok", level="debug", size=len(emb) if emb else 0)
+                return emb
+            except Exception as e:
+                self._log_event("embedding_error", error=str(e), level="error")
+                return []
     
     def search_memories(self, query: str, filters: Optional[Dict] = None, 
                        limit: int = 5, threshold: Optional[float] = None) -> List[Dict]:
@@ -290,7 +320,7 @@ class MemorySystem:
         except Exception as e:
             self._log_event("delete_error", error=str(e), level="error")
     
-    def write_memory(self, conversation: str, user_id: str = None, agent_id: str = None):
+    def write_memory(self, conversation: str, user_id: str = None, agent_id: str = None, extra_metadata: Dict = None):
         """
         记忆写入主流程
         
@@ -298,6 +328,7 @@ class MemorySystem:
             conversation: 用户对话
             user_id: 用户ID
             agent_id: 代理ID
+            extra_metadata: 额外的metadata信息（如session_id, dialog_id等）
         """
         # 1. 提取事实
         new_facts = self.extract_facts(conversation)
@@ -343,6 +374,9 @@ class MemorySystem:
                 "agent_id": agent_id,
                 "created_at": datetime.now().isoformat()
             }
+            # 合并额外metadata
+            if extra_metadata:
+                metadata.update(extra_metadata)
             
             if event == "ADD":
                 self.add_memory(text, metadata)

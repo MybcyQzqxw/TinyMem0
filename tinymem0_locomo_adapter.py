@@ -59,7 +59,7 @@ class TinyMem0LoCoMoAdapter:
         for session_num, date_time, dialogs in sessions:
             print(f"Processing session {session_num} ({date_time})...")
             
-            for dialog in dialogs:
+            for dialog_idx, dialog in enumerate(dialogs):
                 speaker = dialog['speaker']
                 text = dialog['text']
                 
@@ -70,18 +70,26 @@ class TinyMem0LoCoMoAdapter:
                 if 'blip_caption' in dialog and dialog['blip_caption']:
                     conversation_text += f" [分享了图片: {dialog['blip_caption']}]"
                 
+                # 构建metadata，包含session和dialog信息用于evidence追踪
+                extra_metadata = {
+                    'session_id': session_num,
+                    'dialog_id': dialog_idx + 1,  # dialog从1开始编号
+                    'date_time': date_time
+                }
+                
                 # 将对话输入到记忆系统
                 try:
                     self.memory_system.write_memory(
                         conversation=conversation_text,
                         user_id=self.user_id,
-                        agent_id=self.agent_id
+                        agent_id=self.agent_id,
+                        extra_metadata=extra_metadata
                     )
                 except Exception as e:
                     print(f"Error processing dialog {dialog.get('dia_id', 'unknown')}: {e}")
                     continue
     
-    def answer_question(self, question: str, context_limit: int = 10) -> str:
+    def answer_question(self, question: str, context_limit: int = 10) -> tuple[str, List[str]]:
         """
         基于记忆系统回答问题
         
@@ -90,7 +98,7 @@ class TinyMem0LoCoMoAdapter:
             context_limit: 检索的记忆数量限制
             
         Returns:
-            回答文本
+            (回答文本, 检索到的evidence列表)
         """
         try:
             # 从记忆系统中检索相关记忆
@@ -102,7 +110,17 @@ class TinyMem0LoCoMoAdapter:
             )
             
             if not memories:
-                return "No information available"
+                return "No information available", []
+            
+            # 提取evidence信息（从memory的metadata中）
+            retrieved_evidence = []
+            for memory in memories:
+                # 尝试从metadata中提取session和dialog信息
+                if 'metadata' in memory:
+                    meta = memory['metadata']
+                    if 'session_id' in meta and 'dialog_id' in meta:
+                        evidence_id = f"D{meta['session_id']}:{meta['dialog_id']}"
+                        retrieved_evidence.append(evidence_id)
             
             # 构建context
             context_parts = []
@@ -128,11 +146,11 @@ Answer:"""
                 qa_prompt
             )
             
-            return answer.strip() if answer else "No information available"
+            return (answer.strip() if answer else "No information available", retrieved_evidence)
             
         except Exception as e:
             print(f"Error answering question '{question}': {e}")
-            return "No information available"
+            return "No information available", []
     
     def evaluate_qa_sample(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -153,11 +171,12 @@ Answer:"""
             question = qa_item['question']
             ground_truth = str(qa_item['answer'])
             category = qa_item.get('category', 1)
+            gold_evidence = qa_item.get('evidence', [])
             
-            # 获取模型回答
-            prediction = self.answer_question(question)
+            # 获取模型回答和检索的evidence
+            prediction, retrieved_evidence = self.answer_question(question)
             
-            # 计算评估指标
+            # 计算QA评估指标
             if category in [2, 3, 4]:  # single-hop, temporal, open-domain
                 f1 = f1_score(prediction, ground_truth)
             elif category == 1:  # multi-hop
@@ -169,6 +188,12 @@ Answer:"""
             
             em = exact_match_score(prediction, ground_truth)
             
+            # 计算Evidence评估指标
+            evidence_metrics = self._calculate_evidence_metrics(retrieved_evidence, gold_evidence)
+            recall_at_5 = self._calculate_recall_at_k(retrieved_evidence, gold_evidence, k=5)
+            recall_at_10 = self._calculate_recall_at_k(retrieved_evidence, gold_evidence, k=10)
+            mrr = self._calculate_mrr(retrieved_evidence, gold_evidence)
+            
             result_item = {
                 'question': question,
                 'answer': ground_truth,
@@ -176,7 +201,15 @@ Answer:"""
                 'category': category,
                 'f1_score': f1,
                 'exact_match': em,
-                'evidence': qa_item.get('evidence', [])
+                'evidence': gold_evidence,
+                'retrieved_evidence': retrieved_evidence,
+                # Evidence评估指标
+                'evidence_precision': evidence_metrics['precision'],
+                'evidence_recall': evidence_metrics['recall'],
+                'evidence_f1': evidence_metrics['f1'],
+                'recall_at_5': recall_at_5,
+                'recall_at_10': recall_at_10,
+                'mrr': mrr
             }
             results.append(result_item)
         
@@ -191,6 +224,92 @@ Answer:"""
         """
         from locomo.task_eval.evaluation import f1
         return f1(prediction, ground_truth)
+    
+    def _calculate_evidence_metrics(self, retrieved_evidence: List[str], gold_evidence: List[str]) -> Dict[str, float]:
+        """
+        计算Evidence Precision, Recall, F1
+        
+        Args:
+            retrieved_evidence: 系统检索出的evidence列表
+            gold_evidence: 标准答案的evidence列表
+            
+        Returns:
+            包含precision, recall, f1的字典
+        """
+        if not retrieved_evidence or not gold_evidence:
+            return {'precision': 0.0, 'recall': 0.0, 'f1': 0.0}
+        
+        # 转换为集合以便计算交集
+        retrieved_set = set(retrieved_evidence)
+        gold_set = set(gold_evidence)
+        
+        # 计算交集
+        common = retrieved_set & gold_set
+        
+        if len(common) == 0:
+            return {'precision': 0.0, 'recall': 0.0, 'f1': 0.0}
+        
+        # 计算precision和recall
+        precision = len(common) / len(retrieved_set)
+        recall = len(common) / len(gold_set)
+        
+        # 计算F1
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        
+        return {
+            'precision': precision,
+            'recall': recall,
+            'f1': f1
+        }
+    
+    def _calculate_recall_at_k(self, retrieved_evidence: List[str], gold_evidence: List[str], k: int = 5) -> float:
+        """
+        计算Recall@K：前K条检索结果中是否包含gold evidence
+        
+        Args:
+            retrieved_evidence: 系统检索出的evidence列表（按相似度排序）
+            gold_evidence: 标准答案的evidence列表
+            k: 取前K条
+            
+        Returns:
+            Recall@K分数（0或1）
+        """
+        if not gold_evidence:
+            return 1.0  # 如果没有gold evidence，默认为1
+        
+        if not retrieved_evidence:
+            return 0.0
+        
+        # 取前K条
+        top_k = retrieved_evidence[:k]
+        top_k_set = set(top_k)
+        gold_set = set(gold_evidence)
+        
+        # 检查是否有交集
+        return 1.0 if len(top_k_set & gold_set) > 0 else 0.0
+    
+    def _calculate_mrr(self, retrieved_evidence: List[str], gold_evidence: List[str]) -> float:
+        """
+        计算MRR（Mean Reciprocal Rank）：gold evidence在检索结果中的排名倒数
+        
+        Args:
+            retrieved_evidence: 系统检索出的evidence列表（按相似度排序）
+            gold_evidence: 标准答案的evidence列表
+            
+        Returns:
+            MRR分数
+        """
+        if not gold_evidence or not retrieved_evidence:
+            return 0.0
+        
+        gold_set = set(gold_evidence)
+        
+        # 找到第一个命中的位置
+        for rank, evidence in enumerate(retrieved_evidence, start=1):
+            if evidence in gold_set:
+                return 1.0 / rank
+        
+        return 0.0  # 没有命中
     
 
 
@@ -238,6 +357,12 @@ class LoCoMoEvaluator:
         all_results = []
         all_f1_scores = []
         all_em_scores = []
+        all_evidence_precision = []
+        all_evidence_recall = []
+        all_evidence_f1 = []
+        all_recall_at_5 = []
+        all_recall_at_10 = []
+        all_mrr = []
         category_stats = {}
         
         for sample in tqdm(eval_samples, desc="Evaluating samples"):
@@ -259,13 +384,30 @@ class LoCoMoEvaluator:
                 for qa_result in result['qa_results']:
                     all_f1_scores.append(qa_result['f1_score'])
                     all_em_scores.append(qa_result['exact_match'])
+                    all_evidence_precision.append(qa_result['evidence_precision'])
+                    all_evidence_recall.append(qa_result['evidence_recall'])
+                    all_evidence_f1.append(qa_result['evidence_f1'])
+                    all_recall_at_5.append(qa_result['recall_at_5'])
+                    all_recall_at_10.append(qa_result['recall_at_10'])
+                    all_mrr.append(qa_result['mrr'])
                     
                     category = qa_result['category']
                     if category not in category_stats:
-                        category_stats[category] = {'f1_scores': [], 'em_scores': [], 'count': 0}
+                        category_stats[category] = {
+                            'f1_scores': [], 'em_scores': [], 
+                            'evidence_precision': [], 'evidence_recall': [], 'evidence_f1': [],
+                            'recall_at_5': [], 'recall_at_10': [], 'mrr': [],
+                            'count': 0
+                        }
                     
                     category_stats[category]['f1_scores'].append(qa_result['f1_score'])
                     category_stats[category]['em_scores'].append(qa_result['exact_match'])
+                    category_stats[category]['evidence_precision'].append(qa_result['evidence_precision'])
+                    category_stats[category]['evidence_recall'].append(qa_result['evidence_recall'])
+                    category_stats[category]['evidence_f1'].append(qa_result['evidence_f1'])
+                    category_stats[category]['recall_at_5'].append(qa_result['recall_at_5'])
+                    category_stats[category]['recall_at_10'].append(qa_result['recall_at_10'])
+                    category_stats[category]['mrr'].append(qa_result['mrr'])
                     category_stats[category]['count'] += 1
                 
             except Exception as e:
@@ -277,12 +419,24 @@ class LoCoMoEvaluator:
             'total_questions': len(all_f1_scores),
             'average_f1': sum(all_f1_scores) / len(all_f1_scores) if all_f1_scores else 0,
             'average_em': sum(all_em_scores) / len(all_em_scores) if all_em_scores else 0,
+            'average_evidence_precision': sum(all_evidence_precision) / len(all_evidence_precision) if all_evidence_precision else 0,
+            'average_evidence_recall': sum(all_evidence_recall) / len(all_evidence_recall) if all_evidence_recall else 0,
+            'average_evidence_f1': sum(all_evidence_f1) / len(all_evidence_f1) if all_evidence_f1 else 0,
+            'average_recall_at_5': sum(all_recall_at_5) / len(all_recall_at_5) if all_recall_at_5 else 0,
+            'average_recall_at_10': sum(all_recall_at_10) / len(all_recall_at_10) if all_recall_at_10 else 0,
+            'average_mrr': sum(all_mrr) / len(all_mrr) if all_mrr else 0,
         }
         
         # 计算分类别统计
         for category, stats in category_stats.items():
             stats['average_f1'] = sum(stats['f1_scores']) / len(stats['f1_scores']) if stats['f1_scores'] else 0
             stats['average_em'] = sum(stats['em_scores']) / len(stats['em_scores']) if stats['em_scores'] else 0
+            stats['average_evidence_precision'] = sum(stats['evidence_precision']) / len(stats['evidence_precision']) if stats['evidence_precision'] else 0
+            stats['average_evidence_recall'] = sum(stats['evidence_recall']) / len(stats['evidence_recall']) if stats['evidence_recall'] else 0
+            stats['average_evidence_f1'] = sum(stats['evidence_f1']) / len(stats['evidence_f1']) if stats['evidence_f1'] else 0
+            stats['average_recall_at_5'] = sum(stats['recall_at_5']) / len(stats['recall_at_5']) if stats['recall_at_5'] else 0
+            stats['average_recall_at_10'] = sum(stats['recall_at_10']) / len(stats['recall_at_10']) if stats['recall_at_10'] else 0
+            stats['average_mrr'] = sum(stats['mrr']) / len(stats['mrr']) if stats['mrr'] else 0
         
         # 保存结果
         output_data = {
@@ -300,11 +454,19 @@ class LoCoMoEvaluator:
         # 打印统计信息
         print(f"\n=== TinyMem0 LoCoMo Evaluation Results ===")
         print(f"Total Questions: {overall_stats['total_questions']}")
+        print(f"\n## QA Metrics ##")
         print(f"Overall F1 Score: {overall_stats['average_f1']:.4f}")
         print(f"Overall Exact Match: {overall_stats['average_em']:.4f}")
-        print(f"\nBy Category:")
+        print(f"\n## Evidence/Retrieval Metrics ##")
+        print(f"Evidence Precision: {overall_stats['average_evidence_precision']:.4f}")
+        print(f"Evidence Recall: {overall_stats['average_evidence_recall']:.4f}")
+        print(f"Evidence F1: {overall_stats['average_evidence_f1']:.4f}")
+        print(f"Recall@5: {overall_stats['average_recall_at_5']:.4f}")
+        print(f"Recall@10: {overall_stats['average_recall_at_10']:.4f}")
+        print(f"MRR: {overall_stats['average_mrr']:.4f}")
+        print(f"\n## By Category ##")
         for category, stats in category_stats.items():
-            print(f"  Category {category}: F1={stats['average_f1']:.4f}, EM={stats['average_em']:.4f} ({stats['count']} questions)")
+            print(f"Category {category}: F1={stats['average_f1']:.4f}, EM={stats['average_em']:.4f}, Ev-F1={stats['average_evidence_f1']:.4f}, MRR={stats['average_mrr']:.4f} ({stats['count']} questions)")
         
         print(f"\nDetailed results saved to: {output_file}")
         

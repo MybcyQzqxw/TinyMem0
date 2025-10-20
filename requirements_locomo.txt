@@ -22,3 +22,7 @@ numpy>=1.21.0
 
 # JSON处理增强
 ujson>=5.7.0
+
+# 本地LLM支持
+llama-cpp-python>=0.2.0
+sentence-transformers>=2.2.0

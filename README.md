@@ -46,13 +46,31 @@
 
 ## 学习环境搭建
 
-### 1. 安装依赖
+### 1. 环境变量配置
+
+复制 `.env.example` 文件为 `.env` 并根据实际情况修改配置：
 
 ```bash
-pip install -r requirements.txt
+# Windows PowerShell
+Copy-Item .env.example .env
+
+# Linux/Mac
+cp .env.example .env
 ```
 
-### 2. 配置Qdrant
+然后编辑 `.env` 文件，配置必要的环境变量（详见"本地LLM配置"章节）。
+
+### 2. 安装依赖
+
+```bash
+# 基础依赖
+pip install -r requirements.txt
+
+# LoCoMo评测依赖（可选）
+pip install -r requirements_locomo.txt
+```
+
+### 3. 配置Qdrant
 
 系统使用Qdrant的本地文件存储模式，无需Docker服务：
 
@@ -61,9 +79,9 @@ pip install -r requirements.txt
 # 系统会自动创建该目录
 ```
 
-### 3. 配置API密钥
+### 4. 配置API密钥（仅在使用阿里云API时需要）
 
-**注意**: 请确保您有有效的API密钥用于学习目的：
+**注意**: 使用阿里云API模式时需配置密钥，使用本地LLM时可跳过：
 
 ```export
 DASHSCOPE_API_KEY=your_actual_api_key_here
@@ -190,6 +208,82 @@ MemorySystem(collection_name: str = "memories")
 - [Qdrant官方文档](https://qdrant.tech/documentation/)
 - [Qwen模型介绍](https://github.com/QwenLM/Qwen)
 - [向量数据库应用指南](https://www.pinecone.io/learn/)
+
+## 本地LLM配置
+
+### 环境变量配置
+
+TinyMem0支持两种LLM模式：阿里云API或本地GGUF模型。通过环境变量`USE_LOCAL_LLM`控制：
+
+```bash
+# Windows PowerShell
+$env:USE_LOCAL_LLM = "true"  # 使用本地LLM
+$env:USE_LOCAL_LLM = "false" # 使用阿里云API（默认）
+
+# Linux/Mac
+export USE_LOCAL_LLM=true
+export USE_LOCAL_LLM=false
+```
+
+### 本地LLM相关环境变量
+
+```bash
+# 必需：本地GGUF模型路径
+$env:LOCAL_MODEL_PATH = "path/to/your/model.gguf"
+
+# 可选：本地嵌入模型名称（默认：BAAI/bge-small-zh-v1.5）
+$env:LOCAL_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
+
+# 可选：嵌入向量维度（默认：512用于本地模型，1536用于阿里云）
+$env:EMBEDDING_DIM = "512"
+```
+
+### 本地LLM依赖安装
+
+```bash
+# 安装llama-cpp-python（支持GGUF模型）
+pip install llama-cpp-python>=0.2.0
+
+# 安装sentence-transformers（本地嵌入模型）
+pip install sentence-transformers>=2.2.0
+```
+
+### 推荐的本地模型
+
+- **LLM模型**: Qwen2-7B-Instruct-GGUF, Llama3-8B-Chinese-Chat-GGUF
+- **嵌入模型**: BAAI/bge-small-zh-v1.5（中文优化，512维）
+
+## LoCoMo评测指标说明
+
+### QA任务评测指标
+
+- **Token-level F1 Score**: 预测答案与参考答案的token级别F1分数
+- **Exact Match (EM)**: 预测答案与参考答案完全匹配的比例
+
+### Evidence检索评测指标
+
+- **Evidence Precision**: 检索到的对话中包含相关证据的比例
+- **Evidence Recall**: 参考证据中被成功检索到的比例
+- **Evidence F1**: Evidence Precision和Recall的调和平均数
+- **Recall@5**: 前5个检索结果中包含相关证据的比例
+- **Recall@10**: 前10个检索结果中包含相关证据的比例
+- **MRR (Mean Reciprocal Rank)**: 第一个相关证据出现位置的倒数的平均值
+
+### 运行LoCoMo评测
+
+```bash
+# 1. 安装评测依赖
+pip install -r requirements_locomo.txt
+
+# 2. 配置环境变量（使用本地LLM）
+$env:USE_LOCAL_LLM = "true"
+$env:LOCAL_MODEL_PATH = "path/to/model.gguf"
+
+# 3. 运行评测脚本
+python tinymem0_locomo_adapter.py
+```
+
+评测结果将打印所有QA和Evidence/Retrieval指标的统计信息。
 
 ## 贡献学习
 

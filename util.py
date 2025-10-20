@@ -1,5 +1,6 @@
 import json
 import re
+import os
 from typing import List, Dict, Optional, Any
 from dashscope import Generation
 
@@ -94,29 +95,50 @@ def extract_embedding_from_response(response) -> List[float]:
 def call_llm_with_prompt(model: str, system_prompt: str, user_content: str) -> Optional[str]:
     """
     调用LLM并处理响应
+    支持阿里云API和本地GGUF模型
     
     Args:
-        model: 模型名称
+        model: 模型名称或路径
         system_prompt: 系统提示词
         user_content: 用户内容
         
     Returns:
         处理后的响应内容
     """
-    try:
-        response = Generation.call(
-            model=model,
-            messages=[
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': user_content}
-            ],
-            result_format='message'
-        )
-        
-        return extract_llm_response_content(response)
-    except Exception as e:
-        print(f"LLM调用异常: {e}")
-        return None
+    # 检查是否使用本地模型
+    use_local = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
+    
+    if use_local:
+        try:
+            from local_llm import get_local_llm
+            llm = get_local_llm()
+            return llm.chat(
+                messages=[
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_content}
+                ],
+                max_tokens=1024,
+                temperature=0.7
+            )
+        except Exception as e:
+            print(f"本地LLM调用异常: {e}")
+            return None
+    else:
+        # 使用阿里云API
+        try:
+            response = Generation.call(
+                model=model,
+                messages=[
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_content}
+                ],
+                result_format='message'
+            )
+            
+            return extract_llm_response_content(response)
+        except Exception as e:
+            print(f"LLM调用异常: {e}")
+            return None
 
 
 def handle_llm_error(response, operation_name: str = "操作"):
