@@ -1,28 +1,9 @@
-
-# TinyMem0 LoCoMo 评估所需的额外依赖包
-# 在现有 requirements.txt 基础上增加
-
-# NLTK用于文本处理
 nltk>=3.8
-
-# 进度条显示
 tqdm>=4.65.0
-
-# BERT Score评估指标
 bert-score>=0.3.13
-
-# ROUGE评估指标
 rouge>=1.0.1
-
-# 正则表达式增强
 regex>=2023.8.8
-
-# 数值计算
 numpy>=1.21.0
-
-# JSON处理增强
 ujson>=5.7.0
-
-# 本地LLM支持
 llama-cpp-python>=0.2.0
 sentence-transformers>=2.2.0
