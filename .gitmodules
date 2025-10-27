@@ -1,0 +1,3 @@
+[submodule "locomo"]
+	path = locomo
+	url = https://github.com/MybcyQzqxw/locomo.git
